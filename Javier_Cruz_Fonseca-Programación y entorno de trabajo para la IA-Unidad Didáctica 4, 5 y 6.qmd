@@ -1,0 +1,540 @@
+---
+title: "Análisis de Datos de Embarazadas"
+author: "Javier Cruz Fonseca"
+date: "`r Sys.Date()`"
+format: 
+  html:
+    toc: true
+    toc-depth: 3
+    theme: cosmo
+    code-fold: true
+    embed-resources: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE,
+  fig.width = 10,
+  fig.height = 6
+)
+```
+
+# 1. Introducción
+
+Este informe presenta el análisis de datos demográficos y de laboratorio de mujeres embarazadas, con el objetivo de responder a preguntas específicas del hospital sobre cesáreas, características de las pacientes y parámetros de salud.
+
+# 2. Carga y preparación de datos
+
+## 2.1 Carga de librerías necesarias
+
+```{r librerias}
+# Lista de paquetes necesarios
+paquetes <- c("readxl", "dplyr", "tidyr", "janitor", "ggplot2", "knitr", "kableExtra")
+
+# Instalamos los que falten
+paquetes_faltantes <- paquetes[!(paquetes %in% installed.packages()[,"Package"])]
+if(length(paquetes_faltantes)) install.packages(paquetes_faltantes)
+
+# Cargamos las librerías
+library(readxl)       
+library(dplyr)      
+library(tidyr)      
+library(janitor)     
+library(ggplot2)     
+library(knitr)       
+library(kableExtra)  
+```
+
+## 2.2 Carga de datos desde Excel
+
+```{r carga_datos}
+
+datos_demo <- read_excel("C:/Users/Usuario/Documents/UNIVERSIDAD/UAX-IA/Programación y entorno de trabajo para la IA/Ejercicio_2_Feedback/datos entregable.xlsx", sheet = 1)
+
+datos_lab <- read_excel("C:/Users/Usuario/Documents/UNIVERSIDAD/UAX-IA/Programación y entorno de trabajo para la IA/Ejercicio_2_Feedback/datos entregable.xlsx", sheet = 2)
+
+cat("Datos demográficos cargados:", nrow(datos_demo), "registros\n")
+cat("Datos de laboratorio cargados:", nrow(datos_lab), "registros\n")
+```
+
+## 2.3 Limpieza de nombres y unión de datos
+
+```{r union_datos}
+# Limpiamos los nombres antes de unir para evitar problemas
+datos_demo_clean <- datos_demo %>% clean_names()
+datos_lab_clean <- datos_lab %>% clean_names()
+
+# Vemos los nombres de las columnas para identificar la columna ID
+cat("Columnas en datos demográficos:\n")
+print(names(datos_demo_clean))
+
+cat("\nColumnas en datos de laboratorio:\n")
+print(names(datos_lab_clean))
+
+# Identificamos la columna ID común 
+col_id <- intersect(names(datos_demo_clean), names(datos_lab_clean))[1]
+cat("\nColumna ID identificada:", col_id, "\n")
+
+# Unimos los datos
+datos_completos <- datos_demo_clean %>%
+  left_join(datos_lab_clean, by = col_id)
+
+cat("\nDatos unidos:", nrow(datos_completos), "registros\n")
+cat("Columnas totales:", ncol(datos_completos), "\n")
+```
+
+## 2.4 Eliminación de registros sin información de laboratorio
+
+```{r eliminar_sin_lab}
+# Contamos los registros antes de eliminar
+n_antes <- nrow(datos_completos)
+
+# Identificamos columnas que vienen de laboratorio
+cols_demo <- names(datos_demo_clean)
+cols_todas <- names(datos_completos)
+cols_lab_clean <- setdiff(cols_todas, cols_demo)
+
+cat("Columnas de laboratorio identificadas:\n")
+print(cols_lab_clean)
+
+# Eliminamos filas donde todas las columnas de laboratorio son NA
+if(length(cols_lab_clean) > 0) {
+  datos_completos <- datos_completos %>%
+    filter(if_any(all_of(cols_lab_clean), ~!is.na(.)))
+}
+
+n_despues <- nrow(datos_completos)
+
+cat("\nRegistros eliminados sin información de laboratorio:", n_antes - n_despues, "\n")
+cat("Registros restantes:", n_despues, "\n")
+```
+
+# 3. Análisis descriptivo y limpieza de datos
+
+## 3.1 Identificación de valores extraños
+
+```{r valores_extraños}
+# Resumen básico de todas las variables
+summary(datos_completos)
+
+# Identificamos y reemplazamos valores extraños por NA
+datos_completos <- datos_completos %>%
+  mutate(
+    # Valores negativos o extremos en variables numéricas
+    edad_de_la_madre = ifelse(edad_de_la_madre < 12 | edad_de_la_madre > 60, NA, edad_de_la_madre),
+    peso_de_la_madre = ifelse(peso_de_la_madre < 30 | peso_de_la_madre > 200, NA, peso_de_la_madre),
+    peso_al_nacimiento = ifelse(peso_al_nacimiento < 500 | peso_al_nacimiento > 6000, NA, peso_al_nacimiento),
+    tiempo_de_embarazo_al_parto = ifelse(tiempo_de_embarazo_al_parto < 154 | tiempo_de_embarazo_al_parto > 315, NA, tiempo_de_embarazo_al_parto)
+  )
+```
+
+## 3.2 Recodificación de variables categóricas
+
+```{r recodificacion}
+# Recodificamos variables según el diccionario de datos
+datos_completos <- datos_completos %>%
+  mutate(
+    # Lactancia materna: convertimos a factor
+    lactancia_materna = factor(lactancia_materna, levels = c("Sí", "No")),
+    otro_tipo_de_lactancia = factor(otro_tipo_de_lactancia, levels = c("Sí", "No")),
+    
+    # Variables binarias recodificadas (1 = Sí, 0 = No)
+    lactancia_en_embarazo_anterior = factor(lactancia_en_embarazo_anterior, 
+                                            levels = c(0, 1), 
+                                            labels = c("No", "Sí")),
+    gine_publico = factor(gine_publico, levels = c(0, 1), labels = c("No", "Sí")),
+    gine_privado = factor(gine_privado, levels = c(0, 1), labels = c("No", "Sí")),
+    clases_de_parto = factor(clases_de_parto, levels = c(0, 1), labels = c("No", "Sí")),
+    cesarea = factor(cesarea, levels = c(0, 1), labels = c("No", "Sí")),
+    biberon = factor(biberon, levels = c(0, 1), labels = c("No", "Sí")),
+    pareja = factor(pareja, levels = c(0, 1), labels = c("No", "Sí")),
+    
+    # Nacional
+    nacional = factor(nacional, 
+                     levels = c(1, 2, 3), 
+                     labels = c("Española", "Extranjera", "Otras/No consta")),
+    
+    # Profesión
+    profesion = factor(profesion,
+                      levels = c(1, 2, 3, 4, 5),
+                      labels = c("Enfermera", "Oficina", "Médico", "Profesora", "Otros")),
+    
+    # Nivel de estudios
+    nivel_de_estudios = factor(nivel_de_estudios,
+                               levels = c(1, 2, 3, 4, 5, 6),
+                               labels = c("Primaria", "Secundaria", "Bachiller", 
+                                        "Grado", "Máster", "Doctorado o más")),
+    
+    # Situación laboral pareja
+    situacion_laboral_pareja = factor(situacion_laboral_pareja,
+                                     levels = c(1, 2, 3, 4, 5),
+                                     labels = c("Activa", "Parada", "Baja", 
+                                              "Jubilado", "Estudiante"))
+  )
+```
+
+## 3.3 Creación de nuevas variables
+
+### 3.3.1 Colesterol Total
+
+```{r colesterol_total}
+# Buscamos las columnas de colesterol y triglicéridos
+cols_colesterol <- grep("colesterol|ldl|hdl", names(datos_completos), value = TRUE, ignore.case = TRUE)
+cols_trigliceridos <- grep("triglicerido", names(datos_completos), value = TRUE, ignore.case = TRUE)
+
+cat("Columnas relacionadas con colesterol:\n")
+print(cols_colesterol)
+cat("\nColumnas relacionadas con triglicéridos:\n")
+print(cols_trigliceridos)
+
+# Calculamos colesterol total
+if(length(cols_colesterol) >= 2 & length(cols_trigliceridos) >= 1) {
+  col_ldl <- grep("ldl", cols_colesterol, value = TRUE, ignore.case = TRUE)[1]
+  col_hdl <- grep("hdl", cols_colesterol, value = TRUE, ignore.case = TRUE)[1]
+  col_trig <- cols_trigliceridos[1]
+  
+  # Corregimos las escalas si están en valores muy altos 
+  datos_completos <- datos_completos %>%
+    mutate(
+      # Corregimos LDL 
+      !!col_ldl := if_else(!is.na(!!sym(col_ldl)) & !!sym(col_ldl) > 1000, 
+                           !!sym(col_ldl) / 1000, 
+                           !!sym(col_ldl)),
+      # Corregimos HDL 
+      !!col_hdl := if_else(!is.na(!!sym(col_hdl)) & !!sym(col_hdl) > 1000, 
+                           !!sym(col_hdl) / 1000, 
+                           !!sym(col_hdl)),
+      # Calculamos el colesterol total
+      colesterol_total = case_when(
+        !is.na(!!sym(col_ldl)) & !is.na(!!sym(col_hdl)) & !is.na(!!sym(col_trig)) ~
+          !!sym(col_ldl) + !!sym(col_hdl) + (!!sym(col_trig) / 5),
+        TRUE ~ NA_real_
+      )
+    )
+  
+  cat("\nResumen de colesterol total:\n")
+  print(summary(datos_completos$colesterol_total))
+} 
+```
+
+### 3.3.2 Tipo de ginecólogo
+
+```{r tipo_ginecologo}
+# Creamos variable tipo_ginecologo con 3 categorías
+datos_completos <- datos_completos %>%
+  mutate(
+    tipo_ginecologo = case_when(
+      gine_publico == "Sí" & gine_privado == "Sí" ~ "Público y Privado",
+      gine_publico == "Sí" & gine_privado == "No" ~ "Solo Público",
+      gine_publico == "No" & gine_privado == "Sí" ~ "Solo Privado",
+      TRUE ~ "Ninguno/No consta"
+    ),
+    tipo_ginecologo = factor(tipo_ginecologo, 
+                            levels = c("Solo Público", "Solo Privado", 
+                                     "Público y Privado", "Ninguno/No consta"))
+  )
+
+cat("Distribución del tipo de ginecólogo:\n")
+print(table(datos_completos$tipo_ginecologo))
+```
+
+# 4. Tabla descriptiva
+
+```{r tabla_descriptiva}
+# Función para calcular estadísticas descriptivas
+calcular_descriptivas <- function(datos) {
+  
+  # Variables numéricas
+  vars_numericas_base <- c("peso_de_la_madre", "edad_de_la_madre", "peso_al_nacimiento",
+                           "tiempo_de_embarazo_al_parto", "numero_de_clases_de_parto",
+                           "numero_de_hijos")
+  
+  # Buscamos columnas de laboratorio
+  col_ldl <- grep("ldl", names(datos), value = TRUE, ignore.case = TRUE)[1]
+  col_hdl <- grep("hdl", names(datos), value = TRUE, ignore.case = TRUE)[1]
+  col_trig <- grep("triglicerido", names(datos), value = TRUE, ignore.case = TRUE)[1]
+  col_tension <- grep("tension", names(datos), value = TRUE, ignore.case = TRUE)[1]
+  
+  vars_lab <- c(col_tension, col_hdl, col_ldl, col_trig, "colesterol_total")
+  
+  # Combinamos todas las variables continuas
+  vars_continuas <- c(vars_numericas_base, vars_lab)
+  
+  # Variables categóricas 
+  vars_categoricas <- c("area_de_salud", "hospital", "lactancia_materna",
+                       "otro_tipo_de_lactancia", "lactancia_en_embarazo_anterior",
+                       "clases_de_parto", "cesarea", "biberon", "nacional",
+                       "profesion", "nivel_de_estudios", "pareja",
+                       "situacion_laboral_pareja", "tipo_ginecologo")
+  
+  # Filtramos solo las variables que existen
+  vars_continuas <- vars_continuas[vars_continuas %in% names(datos)]
+  vars_categoricas <- vars_categoricas[vars_categoricas %in% names(datos)]
+  
+  # Descriptivas de variables continuas
+  desc_continuas <- datos %>%
+    select(any_of(vars_continuas)) %>%
+    summarise(across(everything(), 
+                    list(Media = ~mean(., na.rm = TRUE),
+                         DE = ~sd(., na.rm = TRUE)),
+                    .names = "{.col}_{.fn}")) %>%
+    pivot_longer(everything(), 
+                names_to = c("Variable", ".value"),
+                names_pattern = "(.*)_(Media|DE)") %>%
+    mutate(
+      Media = round(Media, 2),
+      DE = round(DE, 2),
+      Tipo = "Continua"
+    )
+  
+  # Descriptivas de variables categóricas
+  desc_categoricas <- list()
+  for (var in vars_categoricas) {
+    if (var %in% names(datos)) {
+      freq <- datos %>%
+        count(!!sym(var)) %>%
+        filter(!is.na(!!sym(var))) %>%
+        mutate(
+          Porcentaje = round(n / sum(n) * 100, 2),
+          Variable = paste0(var, " - ", !!sym(var))
+        ) %>%
+        select(Variable, N = n, Porcentaje) %>%
+        mutate(Tipo = "Categórica")
+      
+      desc_categoricas[[var]] <- freq
+    }
+  }
+  
+  desc_cat_final <- bind_rows(desc_categoricas)
+  
+  return(list(continuas = desc_continuas, categoricas = desc_cat_final))
+}
+
+# Calculamos las descriptivas
+descriptivas <- calcular_descriptivas(datos_completos)
+
+# Mostramos la tabla de variables continuas
+kable(descriptivas$continuas, 
+      caption = "Tabla 1. Estadísticas descriptivas de variables continuas",
+      col.names = c("Variable", "Media", "Desviación Estándar", "Tipo")) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = FALSE)
+```
+
+```{r tabla_categoricas}
+# Mostramos la tabla de variables categóricas
+kable(descriptivas$categoricas, 
+      caption = "Tabla 2. Frecuencias y porcentajes de variables categóricas",
+      col.names = c("Variable - Categoría", "N", "Porcentaje (%)", "Tipo")) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = FALSE)
+```
+
+# 5. Histogramas de parámetros de laboratorio
+
+```{r histogramas, fig.height=10, fig.width=12}
+# Identificamos columnas de laboratorio
+col_ldl <- grep("ldl", names(datos_completos), value = TRUE, ignore.case = TRUE)[1]
+col_hdl <- grep("hdl", names(datos_completos), value = TRUE, ignore.case = TRUE)[1]
+col_trig <- grep("triglicerido", names(datos_completos), value = TRUE, ignore.case = TRUE)[1]
+col_tension <- grep("tension", names(datos_completos), value = TRUE, ignore.case = TRUE)[1]
+
+vars_lab <- c(col_tension, col_hdl, col_ldl, col_trig, "colesterol_total")
+vars_lab <- vars_lab[!is.na(vars_lab) & vars_lab %in% names(datos_completos)]
+
+if(length(vars_lab) > 0) {
+  # Preparamos datos en formato largo
+  datos_hist <- datos_completos %>%
+    select(all_of(vars_lab)) %>%
+    pivot_longer(everything(), 
+                 names_to = "variable", 
+                 values_to = "valor") %>%
+    filter(!is.na(valor))
+  
+  # Creamos etiquetas más legibles
+  datos_hist <- datos_hist %>%
+    mutate(
+      variable_label = case_when(
+        variable == "colesterol_total" ~ "Colesterol Total",
+        grepl("ldl", variable, ignore.case = TRUE) ~ "Colesterol LDL",
+        grepl("hdl", variable, ignore.case = TRUE) ~ "Colesterol HDL",
+        grepl("triglicerido", variable, ignore.case = TRUE) ~ "Triglicéridos",
+        grepl("tension", variable, ignore.case = TRUE) ~ "Tensión Arterial Media",
+        TRUE ~ gsub("_", " ", variable)
+      )
+    )
+  
+  # Gráfico de histogramas
+  ggplot(datos_hist, aes(x = valor)) +
+    geom_histogram(bins = 20, fill = "steelblue", color = "white", alpha = 0.8) +
+    facet_wrap(~variable_label, scales = "free", ncol = 3) +
+    labs(
+      title = "Distribución de parámetros de laboratorio",
+      x = "Valor",
+      y = "Frecuencia"
+    ) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+      strip.text = element_text(face = "bold", size = 10),
+      strip.background = element_rect(fill = "lightgray", color = "white")
+    )
+} 
+```
+
+# 6. Análisis específicos solicitados
+
+## 6.1 Porcentaje de cesáreas en la muestra
+
+```{r porcentaje_cesareas}
+# Calculamos el porcentaje de cesáreas
+tabla_cesareas <- datos_completos %>%
+  count(cesarea) %>%
+  filter(!is.na(cesarea)) %>%
+  mutate(Porcentaje = round(n / sum(n) * 100, 2))
+
+kable(tabla_cesareas, 
+      caption = "Tabla 3. Distribución de cesáreas en la muestra",
+      col.names = c("Cesárea", "N", "Porcentaje (%)")) %>%
+  kable_styling(bootstrap_options = c("striped", "hover"),
+                full_width = FALSE)
+
+pct_cesareas <- tabla_cesareas %>% 
+  filter(cesarea == "Sí") %>% 
+  pull(Porcentaje)
+
+if(length(pct_cesareas) > 0) {
+  cat("\nEl porcentaje de cesáreas en la muestra es del", 
+      pct_cesareas, "%\n")
+}
+```
+
+## 6.2 Media de edad según cesárea
+
+```{r edad_cesarea}
+# Calculamos la media de edad por cesárea
+edad_por_cesarea <- datos_completos %>%
+  filter(!is.na(cesarea) & !is.na(edad_de_la_madre)) %>%
+  group_by(cesarea) %>%
+  summarise(
+    Media_edad = round(mean(edad_de_la_madre, na.rm = TRUE), 2),
+    DE_edad = round(sd(edad_de_la_madre, na.rm = TRUE), 2),
+    N = n()
+  )
+
+kable(edad_por_cesarea, 
+      caption = "Tabla 4. Edad de las madres según cesárea",
+      col.names = c("Cesárea", "Media de edad", "DE", "N")) %>%
+  kable_styling(bootstrap_options = c("striped", "hover"),
+                full_width = FALSE)
+
+
+edad_con_cesarea <- edad_por_cesarea %>% 
+  filter(cesarea == "Sí") %>% 
+  pull(Media_edad)
+edad_sin_cesarea <- edad_por_cesarea %>% 
+  filter(cesarea == "No") %>% 
+  pull(Media_edad)
+
+if(length(edad_con_cesarea) > 0 & length(edad_sin_cesarea) > 0) {
+  cat("- Media de edad con cesárea:", edad_con_cesarea, "años\n")
+  cat("- Media de edad sin cesárea:", edad_sin_cesarea, "años\n")
+}
+```
+
+## 6.3 Gráfico de cajas: Edad según cesárea
+
+```{r boxplot_edad_cesarea, fig.height=6, fig.width=8}
+datos_completos %>%
+  filter(!is.na(cesarea) & !is.na(edad_de_la_madre)) %>%
+  ggplot(aes(x = cesarea, y = edad_de_la_madre, fill = cesarea)) +
+  geom_boxplot(alpha = 0.7, outlier.colour = "red", outlier.shape = 16) +
+  stat_summary(fun = mean, geom = "point", shape = 23, size = 3, fill = "white") +
+  scale_fill_manual(values = c("No" = "#66c2a5", "Sí" = "#fc8d62")) +
+  labs(
+    title = "Distribución de la edad de las madres según cesárea",
+    subtitle = "El rombo blanco indica la media",
+    x = "Cesárea",
+    y = "Edad de la madre (años)",
+    fill = "Cesárea"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 14, face = "bold"),
+    plot.subtitle = element_text(size = 10, color = "gray40"),
+    legend.position = "bottom"
+  )
+```
+
+## 6.4 Porcentaje de cesáreas en mujeres que asistieron a clases de parto
+
+```{r cesarea_clases}
+# Filtramos por mujeres que asistieron a clases
+cesareas_en_clases <- datos_completos %>%
+  filter(clases_de_parto == "Sí" & !is.na(cesarea)) %>%
+  count(cesarea) %>%
+  mutate(Porcentaje = round(n / sum(n) * 100, 2))
+
+kable(cesareas_en_clases, 
+      caption = "Tabla 5. Cesáreas en mujeres que asistieron a clases de parto",
+      col.names = c("Cesárea", "N", "Porcentaje (%)")) %>%
+  kable_styling(bootstrap_options = c("striped", "hover"),
+                full_width = FALSE)
+
+
+pct_cesarea_clases <- cesareas_en_clases %>% 
+  filter(cesarea == "Sí") %>% 
+  pull(Porcentaje)
+
+if(length(pct_cesarea_clases) > 0) {
+  cat("\nDe las mujeres que asistieron a clases de parto, el", 
+      pct_cesarea_clases, "% tuvo cesárea\n")
+}
+```
+
+## 6.5 Gráfico de dispersión: Peso de la madre vs Tensión arterial
+
+```{r dispersion_peso_tension, fig.height=6, fig.width=10}
+# Buscamos la columna de tensión arterial
+col_tension <- grep("tension", names(datos_completos), value = TRUE, ignore.case = TRUE)[1]
+
+
+# Verificamos que las variables existen y tienen datos
+if("peso_de_la_madre" %in% names(datos_completos) & !is.na(col_tension)) {
+  
+  datos_plot <- datos_completos %>%
+    filter(!is.na(peso_de_la_madre) & !is.na(!!sym(col_tension)))
+  
+  cat("Número de observaciones para el gráfico:", nrow(datos_plot), "\n")
+  
+  if(nrow(datos_plot) > 0) {
+    # Creamos el gráfico
+    p <- ggplot(datos_plot, aes(x = peso_de_la_madre, y = !!sym(col_tension))) +
+      geom_point(alpha = 0.5, color = "steelblue", size = 2) +
+      geom_smooth(method = "lm", se = TRUE, color = "red", linetype = "dashed") +
+      labs(
+        title = "Relación entre peso de la madre y tensión arterial",
+        subtitle = "Línea roja: regresión lineal con intervalo de confianza del 95%",
+        x = "Peso de la madre (kg)",
+        y = "Tensión arterial (mmHg)"
+      ) +
+      theme_minimal() +
+      theme(
+        plot.title = element_text(size = 14, face = "bold"),
+        plot.subtitle = element_text(size = 10, color = "gray40")
+      )
+    
+    # Mostramos el gráfico
+    print(p)
+    
+    # Calculamos correlación
+    correlacion <- cor(datos_plot$peso_de_la_madre, 
+                       datos_plot[[col_tension]], 
+                       use = "complete.obs")
+    
+    cat("\nCorrelación de Pearson: r =", round(correlacion, 3), "\n")
+  } 
+} 
+```
